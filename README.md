@@ -1,7 +1,9 @@
 # NetCoreMicroservicesSample
 Example implementing an API with microservices using CQRS pattern, event sourcing, message brokers, etc.
 
-Work in progress.
+[I've written a short Medium post about this repository](https://medium.com/@madslundt/microservices-with-event-sourcing-using-net-core-33e3074171f5)
+
+Keep in mind this repository is work in progress.
 
 ## Requirements
  - **Consul**: Service discovery
@@ -19,10 +21,6 @@ Work in progress.
 ## Run with Docker
 This can be run with `docker-compose`.
 Simply go to the [Compose](/Compose) folder and run `docker-compose up --build`.
-
-This will start up SQL server, MongoDB, Elasticsearch, Kibana, APM server, RabbitMQ and Consul.
-
-After that you can run the services with default `appsettings.json`.
 
 ## Architecture
 ![Microservices architecture](microservices_architecture.png "Microservices archivecture")
@@ -51,7 +49,7 @@ In this example **UsersService** is not storing events in an event store. The se
 ## Structure
 How this repository is structured:
 
-- **API/APIGateway**: Api gateway.
+- **ApiGateway**: Api gateway.
 - **Compose**: Docker compose to set up all dependencies (eg. RabbitMQ, SQL Server, etc.)
 - **Src/\*Service**: Microservices in their own solution.
 - **Src/Events**: All events that are published and subscribed to.
@@ -59,7 +57,7 @@ How this repository is structured:
 
 ### Api
 Api gateway is using Ocelot to have a unified point of entry to all microservices.
-Configuration for this can be found in `ocelot.json`.
+Configuration for this can be found in the subfolder Configuration.
 
 ### Microservice
 Microservices are REST APIs and are created without any knowledge to each other. If a microservice wants to notify other services it simply publishes an event and the services subscribing to this event can take action on it using publish/subscribe with RabbitMQ.
@@ -69,7 +67,7 @@ A microservice consists of:
  - **Queries**: Queries used to get data when client wants to read data.
  - **Commands**: Commands used to write data when client wants to modify data.
  - **EventHandlers**: Handlers for events to take action when events are being published.
- - **Repository**: Repository used when writing to the application. This will also publish the correct events.
+ - **Repository**: Repository used with event sourcing when modifying data in the application. This will also publish the correct events.
 
 Next to the microservice is the data model. This contain the migrations, models and update handlers (if using event sourcing) for the database.
 <br />
@@ -81,7 +79,7 @@ Infrastructure contains the logic for the different services and keeps most of t
 
 - [Consul](#Consul)
 - [Core](#Core)
-- [Eventstore](#Eventstore)
+- [EventStore](#EventStore)
 - [Logging](#Logging)
 - [MessageBrokers](#MessageBrokers)
 - [Outbox](#Outbox)
@@ -107,7 +105,7 @@ Appsettings for consul looks like this
 - **Tags**: is optional and is by default empty.
 - **Address** is required and must include uri schema, host and port (eg. http://localhost:8500).
 
-`AddConsul` and `UseConsul` can be used in order to include it in the application.
+`AddConsul` and `UseConsul` is used in order to include it in the application.
 
 
 #### Core
@@ -120,12 +118,16 @@ Core contain basic functionalities and must be imported most of the other servic
 - **Mapping** contain functionality to map one object into a class.
 - **ValidationBehavior** contain validation and is added as a mediator pipeline. This makes sure to run validation if such is added to the request.
 
-`AddCore` can be used with a type from each project that needs to include CQRS.
+`AddCore` is used with a type from each project that needs to include CQRS.
 
-#### Eventstores
-Event store is a database where all events published in the application are stored. This is used with eventsourcing and will be a write model for the application.
+#### EventStore
+Event store is a database where all events published in the application are stored. This is used with event sourcing and will be a write model for the application.
 
-At the moment the only eventstore supported is *MongoDb*.
+At the moment the event stores supported are *MongoDb* and *EF core*.
+
+`AddEventStore` is used with the aggregate as the type, and the Configuration and DbContextOptionsBuilder (only used with EF core) to include event store in the application.
+
+Choice of event store is configured in appsettings with the key **EventStoreType**.
 
 Besides that it also contain interfaces and abstract classes:
 - **Aggregates** is a set of related entities and value objects that model a single thing (or related set of things) which need to remain internally consistent.
@@ -136,7 +138,8 @@ Besides that it also contain interfaces and abstract classes:
 ##### MongoDb
 ```
 {
-    "MongoDbEventStoreOptions": {
+    "EventStoreOptions": {
+        "EventStoreType": "mongo",
         "DatabaseName": "",
         "CollectionName": "",
         "ConnectionString": ""
@@ -148,12 +151,20 @@ Besides that it also contain interfaces and abstract classes:
 - **CollectionName** is optional and is by default 'Events'.
 - **ConnectionString**: is required and must include uri schema, host and port (eg. mongodb://localhost:27017)
 
-`AddMongoDbEventStore` can be used with the aggregate as the type and the Configuration to include event store with MongoDb in the application.
+##### Ef core
+```
+{
+    "EventStoreOptions": {
+        "EventStoreType": "ef"
+    }
+}
+```
+Choice of database is set when using *AddEventStore* with **DbContextOptionsBuilder**.
 
 #### Logging
 Logging is using Serilog and ELK APM.
 
-`LoggingExtensions.AddLogging` and `UseLogging` can be used to include logging in the application.
+`LoggingExtensions.AddLogging` and `UseLogging` is used to include logging in the application.
 <br />
 `UseSerilog` must be used in *Program.cs*.
 
@@ -162,12 +173,44 @@ Message broker is used to publish and subscribe to events across services. This 
 
 At the moment the only message brokers supported is *RabbitMQ*
 
-`UseSubscribeEvent` can be used to subscribe to a specific event.
+`AddMessageBroker` is used to include message broker.
+
+Choice of message broker is configured in appsettings with the key **MessageBrokerType**.
+
+`UseSubscribeEvent` is used to subscribe to a specific event.
 <br />
-`UseSubscribeAllEvents` can be used to subscribe to all events in the application.
+`UseSubscribeAllEvents` is used to subscribe to all events in the application.
 
 ##### RabbitMQ
-`AddRabbitMQ` can be used to include RabbitMQ in the application.
+```
+"MessageBrokersOptions": {
+    "messageBrokerType": "rabbitmq",
+    "username": "",
+    "password": "",
+    "virtualHost": "",
+    "port": 5672,
+    "hostnames": [""],
+    "requestTimeout": "",
+    "publishConfirmTimeout": "",
+    "recoveryInterval": "",
+    "persistentDeliveryMode": true,
+    "autoCloseConnection": true,
+    "automaticRecovery": true,
+    "topologyRecovery": true,
+    "exchange": {
+        "durable": true,
+        "autoDelete": false,
+        "type": "",
+        "name": ""
+    },
+    "queue": {
+        "declare": true,
+        "durable": true,
+        "exclusive": false,
+        "autoDelete": false
+    }
+}
+```
 
 #### Outbox
 Outbox is used to store events before they are published to the message broker. The events are either removed after being published to the message broker or kept with the *processed* property set to the datetime, in UTC, it was published to the message broker.
@@ -177,10 +220,38 @@ That also means that the Outbox database should be hosted very close to the serv
 
 In order to publish events to the message broker a hosted service is running in Outbox to look for unpublished events in the interval of every 2 second.
 
-`AddOutbox` can be used to include Outbox with MongoDb in the application.
+`AddOutbox` is used to include Outbox in the application.
+
+Choice of store is configured in appsettings with the key **OutboxType**.
+
+##### MongoDb
+```
+"OutboxOptions": {
+    "OutboxType": "mongo",
+    "DatabaseName": "",
+    "CollectionName": "",
+    "ConnectionString": "",
+    "DeleteAfter": true
+}
+```
+
+- **DatabaseName** is optional and is by default 'EventStore'
+- **CollectionName** is optional and is by default 'Events'.
+- **ConnectionString**: is required and must include uri schema, host and port (eg. mongodb://localhost:27017)
+
+##### Ef core
+```
+{
+    "OutboxOptions": {
+        "OutboxType": "ef",
+        "DeleteAfter": true
+    }
+}
+```
+Choice of database is set when using *AddOutbox* with **DbContextOptionsBuilder**.
 
 #### Swagger
 Swagger is used for API documentation.
 
-`AddSwagger` and `UseSwagger` can be used to include swagger in the application.
+`AddSwagger` and `UseSwagger` is used to include swagger in the application.
 

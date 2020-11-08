@@ -1,32 +1,29 @@
 ﻿using Infrastructure.Core.Events;
 using Infrastructure.MessageBrokers;
-using Microsoft.Extensions.Options;
-using MongoDB.Driver;
+using Infrastructure.Outbox.Stores;
 using Newtonsoft.Json;
 using System.Threading.Tasks;
 
 namespace Infrastructure.Outbox
-{    
+{
     public class OutboxListener : IOutboxListener
     {
-        private readonly IMongoCollection<OutboxMessage> _outboxMessages;
+        private readonly IOutboxStore _store;
 
-        public OutboxListener(IOptions<OutboxOptions> options)
+        public OutboxListener(IOutboxStore store)
         {
-            var client = new MongoClient(options.Value.ConnectionString);
-            var database = client.GetDatabase(options.Value.DatabaseName);
-            _outboxMessages = database.GetCollection<OutboxMessage>(options.Value.CollectionName);
+            _store = store;
         }
 
         public virtual async Task Commit(OutboxMessage message)
         {
-            await _outboxMessages.InsertOneAsync(message);
+            await _store.Add(message);
         }
 
         public virtual async Task Commit<TEvent>(TEvent @event) where TEvent : IEvent
         {
             var outboxMessage = new OutboxMessage
-            {
+            { 
                 Type = MessageBrokersHelper.GetTypeName<TEvent>(),
                 Data = @event == null ? "{}" : JsonConvert.SerializeObject(@event, new JsonSerializerSettings
                 {

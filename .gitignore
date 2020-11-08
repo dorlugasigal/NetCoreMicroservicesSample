@@ -39,3 +39,8 @@ msbuild.wrn
 
 API/API.xml
 logs/
+
+ocelot.json
+[Oo]celot.[Pp]roduction.json
+[Oo]celot.[Ss]taging.json
+[Oo]celot.[Dd]evelopment.json

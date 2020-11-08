@@ -1,10 +1,10 @@
 ﻿using Infrastructure.MessageBrokers;
+using Infrastructure.Outbox.Stores;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,19 +12,16 @@ namespace Infrastructure.Outbox
 {
     internal sealed class OutboxProcessor : IHostedService
     {
-        private readonly IMongoCollection<OutboxMessage> _outboxMessages;
-        private readonly IEventListener _eventListener;
         private readonly OutboxOptions _outboxOptions;
+        private readonly IEventListener _eventListener;
+        private readonly IServiceScopeFactory _serviceScopeFactory;
         private Timer _timer;
 
-        public OutboxProcessor(IEventListener eventListener, IOptions<OutboxOptions> options)
+        public OutboxProcessor(IServiceScopeFactory serviceScopeFactory, IOptions<OutboxOptions> options, IEventListener eventListener)
         {
+            _serviceScopeFactory = serviceScopeFactory;
             _eventListener = eventListener;
             _outboxOptions = options.Value;
-
-            var client = new MongoClient(options.Value.ConnectionString);
-            var database = client.GetDatabase(options.Value.DatabaseName);
-            _outboxMessages = database.GetCollection<OutboxMessage>(options.Value.CollectionName);
         }
 
         public Task StartAsync(CancellationToken cancellationToken)
@@ -46,22 +43,32 @@ namespace Infrastructure.Outbox
 
         public async Task Process()
         {
-            var cursor = await _outboxMessages.Find(Builders<OutboxMessage>.Filter.Where(d => !d.Processed.HasValue)).ToCursorAsync();
-            var publishedMessageIds = new List<Guid>();
-            try
+            using (var scope = _serviceScopeFactory.CreateScope())
             {
-                foreach (var message in cursor.ToEnumerable())
+                var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+                var messageIds = await store.GetUnprocessedMessageIds();
+                var publishedMessageIds = new List<Guid>();
+                try
                 {
-                    await _eventListener.Publish(message.Data, message.Type);
-                    publishedMessageIds.Add(message.Id);
-                    await _outboxMessages.UpdateOneAsync(Builders<OutboxMessage>.Filter.Eq(d => d.Id, message.Id), Builders<OutboxMessage>.Update.Set(x => x.Processed, DateTime.UtcNow));
+                    foreach (var messageId in messageIds)
+                    {
+                        var message = await store.GetMessage(messageId);
+                        if (message is null || message.Processed.HasValue)
+                        {
+                            continue;
+                        }
+
+                        await _eventListener.Publish(message.Data, message.Type);
+                        await store.SetMessageToProcessed(message.Id);
+                        publishedMessageIds.Add(message.Id);
+                    }
                 }
-            }
-            finally
-            {
-                if (_outboxOptions.DeleteAfter)
+                finally
                 {
-                    await _outboxMessages.DeleteManyAsync(Builders<OutboxMessage>.Filter.In(d => d.Id, publishedMessageIds));
+                    if (_outboxOptions.DeleteAfter)
+                    {
+                        await store.Delete(publishedMessageIds);
+                    }
                 }
             }
         }
